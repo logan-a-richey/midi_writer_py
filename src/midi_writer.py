@@ -1,5 +1,23 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 # midi_writer.py
+
+"""
+Minimal, dependency-free MIDI file writer.
+
+This module provides a low-level API for constructing Standard MIDI Files (SMF)
+programmatically. It supports multi-track files, note events, tempo changes,
+time signatures, program changes, and track metadata.
+
+Design goals:
+- Explicit track management (no hidden track creation)
+- Predictable, MIDI-spec-compliant output
+- Keyword-driven public API
+- No external dependencies
+- Internal data structures are fully encapsulated
+
+All time values are expressed in MIDI ticks. The default resolution is
+480 ticks per quarter note.
+"""
 
 from typing import (List, Dict, Tuple)
 import struct
@@ -10,6 +28,20 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class MidiWriter:
+    """
+    MidiWriter builds and writes Standard MIDI Files (SMF).
+
+    Tracks are created explicitly via `add_track()` and referenced by index.
+    Events are added to tracks using keyword-only methods. Internally, events
+    are stored as absolute ticks and converted to delta times during serialization.
+
+    The class intentionally exposes a small, low-level API that mirrors the MIDI
+    file format closely rather than abstracting musical time or structure.
+    """
+
+    ################################################################################
+    # Internals 
+
     TICKS_PER_QUARTER = 480
 
     # MIDI meta-event constants
@@ -22,7 +54,6 @@ class MidiWriter:
     # 0x7F to denote 0x0111_1111 and 
     # 0x80 to denote 0x1000_0000
 
-    # Internal classes:
     class _Track:
         def __init__(self) -> None:
             self._events: List[Tuple[int, bytes]] = []
@@ -37,9 +68,12 @@ class MidiWriter:
         def get_events(self) -> List[Tuple[int, bytes]]:
             return self._events
     
-    # CTOR for the MidiWriter class
+    ################################################################################
+    # MidiWriter class methods
+
     def __init__(self) -> None:
-        ''' CTOR '''
+        """ MidiWriter CTOR """
+
         self._tracks: List["MidiWriter._Track"] = []
         self._channel_programs: Dict[int, int] = {}
 
@@ -48,18 +82,50 @@ class MidiWriter:
         self.channel_program: Dict[int, int] = {}
     
     def add_track(self) -> int:
-        ''' Explicitly add a new track. Returns its index. '''
+        """
+        Create a new MIDI track.
+
+        Returns
+        -------
+        int
+            The index of the newly created track. Track indices are zero-based
+            and remain stable for the lifetime of the writer.
+        """
+
         self._tracks.append(MidiWriter._Track())
         return len(self._tracks) - 1
     
     def _get_track(self, track_index: int) -> "_Track":
-        ''' Expand the track list if I need it. '''
+        """
+        Private method.
+
+        Return the track at the given index, extending the internal track list 
+        if necessary.
+
+        This matches the behavior of my C++ implementation and allows events
+        to be added to arbitrary track indices without requiring strict ordering.
+        """
+
         while track_index >= len(self._tracks):
             self.add_track()
         return self._tracks[track_index]
     
+    ################################################################################
     # MIDI events:
     def set_channel(self, **kwargs) -> None:
+        """
+        Assign a program (instrument) to a MIDI channel.
+
+        A Program Change event is emitted at tick 0 on track 0 by convention.
+
+        Parameters
+        ----------
+        channel : int
+            MIDI channel number (0–15).
+        program : int
+            MIDI program number (0–127).
+        """
+
         channel = kwargs.get("channel", 0)
         program = kwargs.get("program", 0)
 
@@ -78,14 +144,21 @@ class MidiWriter:
         self._get_track(0).add_event(0, event)
 
     def add_bpm(self, **kwargs) -> None:
-        ''' 
-        Parameters:
-            track: int
-            start: int 
-            bpm: int
-        Return:
-            None
-        '''
+        """
+        Add a tempo (BPM) change event.
+
+        Tempo is stored as microseconds per quarter note, per the MIDI specification.
+        Multiple tempo changes may be added at different tick positions.
+
+        Parameters
+        ----------
+        track : int
+            Track index to receive the tempo event (conventionally 0).
+        start : int
+            Absolute tick position of the event.
+        bpm : int
+            Tempo in beats per minute.
+        """
 
         track = kwargs.get("track", 0)
         start = kwargs.get("start", 0)
@@ -103,6 +176,24 @@ class MidiWriter:
 
 
     def add_time_signature(self, **kwargs) -> None:
+        """
+        Add a time signature meta-event.
+
+        The denominator must be a power of two, as required by the MIDI specification.
+        Multiple time signature changes may be added over time.
+
+        Parameters
+        ----------
+        track : int
+            Track index to receive the event (conventionally 0).
+        start : int
+            Absolute tick position of the event.
+        numerator : int
+            Beats per measure.
+        denominator : int
+            Note value representing one beat (power of two).
+        """
+
         track = kwargs.get("track", 0)
         start = kwargs.get("start", 0)
         numerator = kwargs.get("numerator", 4)
@@ -124,11 +215,28 @@ class MidiWriter:
         self._get_track(track).add_event(start, event)
 
     def add_track_name(self, **kwargs) -> None:
+        """
+        Assign a human-readable name to a track.
+
+        This emits a Track Name meta-event. Names are encoded as ASCII;
+        non-ASCII characters are ignored.
+
+        Parameters
+        ----------
+        track : int
+            Track index.
+        start : int
+            Absolute tick position of the event.
+        name : str
+            Track name.
+        """
+
         track = kwargs.get("track", 0)
         start = kwargs.get("start", 0)
         name = kwargs.get("name", "Track")
         
         # char* literal into memory, we read until we terminate the string with \0 null terminator 
+        # we convert utf8 python string to ascii and then write the char array
         name_bytes = name.encode("ascii", errors="ignore")
         event = MidiWriter.META_TRACK_NAME + bytes([len(name_bytes)]) + name_bytes
 
@@ -136,17 +244,30 @@ class MidiWriter:
 
 
     def add_note(self, **kwargs) -> None:
-        '''
-        Params:
-            track       : int [0, ...)
-            channel     : int [0, ...)
-            start       : int [0, ...)
-            duration    : int [0, ...)
-            pitch       : int [0, 127]
-            velocity    : int [0, 127]
-            off_velocity: int [0, 127]
-        '''
-        
+        """
+        Add a MIDI note-on / note-off pair.
+
+        Notes are defined using absolute tick positions. The note-off velocity
+        defaults to 64, matching common MIDI practice.
+
+        Parameters
+        ----------
+        track : int
+            Track index.
+        channel : int
+            MIDI channel number (0–15).
+        start : int
+            Absolute tick where the note begins.
+        duration : int
+            Length of the note in ticks.
+        pitch : int
+            MIDI note number (0–127).
+        velocity : int
+            Note-on velocity (0–127).
+        off_velocity : int, optional
+            Note-off velocity (default: 64).
+        """
+
         # get params from user
         track = kwargs.get("track", 0) 
         channel = kwargs.get("channel", 0)
@@ -205,9 +326,13 @@ class MidiWriter:
 
     ################################################################################
     # Encoding stage:
+
     @staticmethod
     def encode_var_len(value: int) -> bytes:
-        ''' Encode an integer as a MIDI variable-length quantity. '''
+        """
+        Encode an integer as a MIDI variable-length quantity (VLQ).
+        This is used for delta-time encoding in track event streams.
+        """
 
         buffer = []
         shifted = value & 0x7F 
@@ -229,6 +354,18 @@ class MidiWriter:
     # File output:
     
     def save_as_midi(self, filename: str) -> None: 
+        """
+        Write the constructed MIDI data to disk.
+
+        This method sorts events within each track, encodes delta times,
+        writes the MIDI header, and serializes all track chunks.
+
+        Parameters
+        ----------
+        filename : str
+            Path to the output `.mid` file.
+        """
+
         # sort events in each track:
         for track in self._tracks:
             track.sort_events() 

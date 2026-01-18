@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # examples.py
 # Demonstrates use of my flexible MidiWriter library class.
 
