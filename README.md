@@ -10,11 +10,13 @@
 - add track name
 - add program -> channel mapping
 - add note
+- add tempo changes
 - add time signatures
-- add bpm changes
 - `save_as_midi` function to write to MIDI binary file,
 - uses MIDI standard of 480 ticks per quarter note.
 
+## Screenshot:
+![Screenshot](screenshots/midi_generation.png)
 
 ## Installation
 1. Clone this repo.
