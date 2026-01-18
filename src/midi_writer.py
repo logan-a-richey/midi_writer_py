@@ -79,7 +79,7 @@ class MidiWriter:
         # private
         self._tracks: List["MidiWriter._Track"] = []
         self._channel_programs: Dict[int, int] = {}
-        self._track_channel_initialized: Dict[int, set[int]] = {}
+        self._track_channel_initialized: Dict[int, Set[int]] = {}
 
         # public
         self.ticks_per_quarter: int = 480
