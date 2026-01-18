@@ -19,7 +19,9 @@ All time values are expressed in MIDI ticks. The default resolution is
 480 ticks per quarter note.
 """
 
-from typing import (List, Dict, Tuple)
+from __future__ import annotations
+
+from typing import (List, Dict, Tuple, Set)
 import struct
 import logging
 
@@ -73,14 +75,17 @@ class MidiWriter:
 
     def __init__(self) -> None:
         """ MidiWriter CTOR """
-
+        
+        # private
         self._tracks: List["MidiWriter._Track"] = []
         self._channel_programs: Dict[int, int] = {}
+        self._track_channel_initialized: Dict[int, set[int]] = {}
 
+        # public
         self.ticks_per_quarter: int = 480
         self.tracks: List[Track] = []
         self.channel_program: Dict[int, int] = {}
-    
+
     def add_track(self) -> int:
         """
         Create a new MIDI track.
@@ -318,11 +323,26 @@ class MidiWriter:
         note_off = bytes([
             0x80 | (channel & 0x0F),
             pitch & 0x7F,
-            velocity & 0x7F
+            off_velocity & 0x7F
         ])
         track_instance = self._get_track(track)
+
+        if track not in self._track_channel_initialized:
+            self._track_channel_initialized[track] = set()
+        
+        if channel not in self._track_channel_initialized[track]:
+            program = self._channel_programs.get(channel)
+            if program is not None:
+                program_event = bytes([
+                    0xC0 | (channel & 0x0F),
+                    program & 0x7F
+                ])
+                track_instance.add_event(start, program_event)
+
+            self._track_channel_initialized[track].add(channel)
+
         track_instance.add_event(start, note_on)
-        track_instance.add_event(start, note_off)
+        track_instance.add_event(end, note_off)
 
     ################################################################################
     # Encoding stage:

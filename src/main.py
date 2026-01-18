@@ -6,14 +6,23 @@ sys.dont_write_bytecode = True
 
 from examples import (
     example_scale, 
-    example_twinkle_star
+    example_twinkle_star,
+    example_chords,
+    example_overlapping_voices, 
+    example_drums,
+    example_multiple_tracks
 )
 
 def main():
     tests = [
         example_scale, 
-        example_twinkle_star
+        example_twinkle_star,
+        example_chords,
+        example_overlapping_voices, 
+        example_drums,
+        example_multiple_tracks
     ]
+
     for test in tests:
         test_name = test.__name__
         print("Testing {} ...".format(test_name))
